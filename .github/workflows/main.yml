@@ -1,4 +1,19 @@
-@@ -17,6 +17,7 @@
+#==========================================================================
+# Description: Compile rockchip rk35xx kernel
+# Copyright (C) 2023 https://github.com/unifreq/linux-5.10.y-rk35xx
+# Copyright (C) 2023 https://github.com/ophub/kernel
+#==========================================================================
+
+name: Compile rockchip rk35xx kernel
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+    inputs:
+      kernel_source:
+        description: "Select the kernel source"
+        required: false
+        default: "LeeGartu/unifreq-linux-5.10.y-rk35xx"
         type: choice
         options:
           - LeeGartu/unifreq-linux-5.10.y-rk35xx
@@ -6,7 +21,12 @@
           - unifreq/linux-5.10.y-rk35xx
           - unifreq/linux-6.1.y-rockchip
           - codesnas/linux-5.10.y-rk35xx
-@@ -29,156 +30,157 @@
+          - codesnas/linux-6.1.y-rockchip
+          - armbian/linux-rockchip@rk-6.1-rkr5.1
+      kernel_version:
+        description: "Select kernel version"
+        required: false
+        default: "5.10.160"
         type: choice
         options:
           - 5.10.160
@@ -134,9 +154,9 @@ jobs:
           ln -sf /builder/output /home/runner/work/_actions/ophub/amlogic-s9xxx-armbian/main/compile-kernel/output
           echo "status=success" >> ${GITHUB_OUTPUT}
 
-      - name: Compile the kernel [ ${{ inputs.kernel_version }} ]
+      - name: Compile the kernel [ ${{ inputs.kernel_version }} ]        
+        id: compile
         uses: ophub/amlogic-s9xxx-armbian@main
-        if: ${{ steps.mapped.outputs.status }} == 'success' && !cancelled()
         with:
           build_target: kernel
           kernel_source: ${{ inputs.kernel_source }}
@@ -151,11 +171,11 @@ jobs:
           silent_log: ${{ inputs.silent_log }}
 
       - name: Upload Kernel to Release
+        if: github.event.repository.owner.id == github.event.sender.id && steps.compile.outcome == 'success' && !cancelled()
         uses: ncipollo/release-action@main
-        if: ${{ env.PACKAGED_STATUS }} == 'success' && !cancelled()
         with:
           tag: kernel_rk35xx
-          artifacts: ${{ env.PACKAGED_OUTPUTPATH }}/*
+          artifacts: '${{ env.PACKAGED_OUTPUTPATH }}/*'
           allowUpdates: true
           token: ${{ secrets.GITHUB_TOKEN }}
           body: |
