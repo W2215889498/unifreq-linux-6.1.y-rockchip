@@ -1,43 +1,30 @@
-#==========================================================================
-# Description: Compile the kernel
-# Copyright (C) 2021 https://github.com/unifreq/openwrt_packit
-# Copyright (C) 2021 https://github.com/ophub/kernel
-#==========================================================================
-
-name: Compile the kernel
-
-on:
-  repository_dispatch:
-  workflow_dispatch:
-    inputs:
-      kernel_source:
-        description: "Select the kernel source"
-        required: false
-        default: "unifreq"
+@@ -17,6 +17,7 @@
         type: choice
         options:
-          - unifreq
-          - ophub
-      kernel_version:
-        description: "Select kernel version"
-        required: false
-        default: "6.18.y"
+          - LeeGartu/unifreq-linux-5.10.y-rk35xx
+          - LeeGartu/unifreq-linux-6.1.y-rockchip
+          - unifreq/linux-5.10.y-rk35xx
+          - unifreq/linux-6.1.y-rockchip
+          - codesnas/linux-5.10.y-rk35xx
+@@ -29,156 +30,157 @@
         type: choice
         options:
-          - all
+          - 5.10.160
+          - 6.1.115
           - 5.10.y
-          - 5.15.y
           - 6.1.y
-          - 6.6.y
-          - 6.12.y
-          - 6.18.y
       kernel_auto:
         description: "Auto use the latest kernel"
+        required: false
+        default: false
+        type: boolean
+      silent_log:
+        description: "Use silent logging"
         required: false
         default: true
         type: boolean
       delete_source:
-        description: "Delete source after compilation"
+        description: "Delete the source after compilation"
         required: false
         default: true
         type: boolean
@@ -55,170 +42,125 @@ on:
         default: "gcc"
         type: choice
         options:
-          - clang
           - gcc
-          - gcc-15.2
-          - gcc-14.3
           - gcc-14.2
-      ccache_clear:
-        description: "Set whether to clear the cache"
+      compress_format:
+        description: "Set the initrd compression format"
         required: false
-        default: false
-        type: boolean
-      docker_image:
-        description: "Select Armbian docker image"
-        required: false
-        default: "resolute"
+        default: "xz"
         type: choice
         options:
-          - trixie
-          - bookworm
-          - resolute
-          - noble
+          - xz
+          - gzip
+          - zstd
+          - lzma
       kernel_sign:
         description: "Set the kernel custom signature"
         required: false
-        default: "-ophub"
+        default: "-rk35xx-leegartu"
         type: choice
         options:
-          - -ophub
-          - -yourname
+          - -rk35xx-ophub
+          - -rk35xx-leegartu
+      kernel_config:
+        description: "Set the path of kernel .config"
+        required: false
+        default: "kernel-config/release/rk35xx"
+        type: choice
+        options:
+          - kernel-config/release/rk35xx
+          - false
 
 env:
-  TZ: Etc/UTC
+  TZ: America/New_York
 
 jobs:
-  setup:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    steps:
-      - name: Set build matrix based on kernel_version input
-        id: set-matrix
-        run: |
-          if [[ "${{ inputs.kernel_version }}" == "all" ]]; then
-            MATRIX='{"include":[{"kernel_version":"5.10.y"},{"kernel_version":"5.15.y"},{"kernel_version":"6.1.y"},{"kernel_version":"6.6.y"},{"kernel_version":"6.12.y"},{"kernel_version":"6.18.y"}]}'
-          else
-            MATRIX='{"include":[{"kernel_version":"${{ inputs.kernel_version }}"}]}'
-          fi
-          echo "matrix=${MATRIX}" >> "${GITHUB_OUTPUT}"
-
   build:
-    needs: setup
-    runs-on: ubuntu-24.04-arm
-    if: ${{ github.event.repository.owner.id == github.event.sender.id }}
-    permissions:
-      contents: write
-
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
-
-    name: compile-kernel-${{ matrix.kernel_version }}
+    runs-on: ubuntu-22.04-arm
+    if: ${{ github.event.repository.owner.id }} == ${{ github.event.sender.id }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
-      - name: Initialize the build environment
+      - name: Initialization environment
         id: init
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          docker rmi -f $(docker images -q) 2>/dev/null || true
+          docker rmi $(docker images -q) 2>/dev/null
           [[ -n "${AGENT_TOOLSDIRECTORY}" ]] && sudo rm -rf "${AGENT_TOOLSDIRECTORY}"
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android 2>/dev/null
           sudo swapoff -a
           sudo rm -f /swapfile /mnt/swapfile
           sudo -E apt-get -y update
           sudo -E apt-get -y purge azure-cli ghc* zulu* llvm* firefox google* dotnet* powershell openjdk* mongodb* moby* || true
-          sudo -E apt-get -y install $(curl -fsSL https://ophub.org/ubuntu2404-build-armbian-depends)
+          sudo -E apt-get -y install $(curl -fsSL https://tinyurl.com/ubuntu2204-build-armbian)
           sudo -E systemctl daemon-reload
           #sudo -E apt-get -y full-upgrade
           sudo -E apt-get -y autoremove --purge
           sudo -E apt-get clean
           sudo sed -i '/NVM_DIR/d;/skel/d' /root/{.bashrc,.profile}
           sudo rm -rf ~/{.cargo,.dotnet,.rustup}
-          sudo -E timedatectl set-timezone "${TZ:-Etc/UTC}"
-          sudo -E ntpdate ntp.ubuntu.com 0.pool.ntp.org || true
-          sudo -E timedatectl set-ntp true
-          date -u
-          timedatectl status || true
+          sudo timedatectl set-timezone "${TZ}"
           echo "status=success" >> ${GITHUB_OUTPUT}
 
-      - name: Create virtual disk for extended storage
+      - name: Create simulated physical disk
         id: disk
         run: |
-          # Get available space in exact GB
-          root_avail=$(df --block-size=1G / | tail -1 | awk '{print $4}')
-          root_size=$(( root_avail - 4 ))
-          [[ "${root_size}" -gt 0 ]] || { echo "Error: Insufficient space on /: ${root_avail}G available"; exit 1; }
-
+          mnt_size=$(expr $(df -h /mnt | tail -1 | awk '{print $4}' | sed 's/[[:alpha:]]//g' | sed 's/\..*//') - 1)
+          root_size=$(expr $(df -h / | tail -1 | awk '{print $4}' | sed 's/[[:alpha:]]//g' | sed 's/\..*//') - 4)
+          sudo truncate -s "${mnt_size}"G /mnt/mnt.img
           sudo truncate -s "${root_size}"G /root.img
-          build_dev=$(sudo losetup --find --show /root.img)
-          echo "Using /: ${root_size}G"
-
-          sudo mkfs.xfs -f -i sparse=0 -b size=4096 "${build_dev}"
+          sudo losetup /dev/loop6 /mnt/mnt.img
+          sudo losetup /dev/loop7 /root.img
+          sudo pvcreate /dev/loop6
+          sudo pvcreate /dev/loop7
+          sudo vgcreate github /dev/loop6 /dev/loop7
+          sudo lvcreate -n runner -l 100%FREE github
+          sudo mkfs.xfs /dev/github/runner
           sudo mkdir -p /builder
-          sudo mount "${build_dev}" /builder
-          sudo chown -R runner:runner /builder
+          sudo mount /dev/github/runner /builder
+          sudo chown -R runner.runner /builder
           df -Th
-          echo "status=success" >> ${GITHUB_OUTPUT}
 
-      - name: Get kernel source commit hash
-        id: kernelhash
+      - name: Create a mapped directory
+        id: mapped
+        working-directory: /builder
         run: |
-          # Get the latest source hash from the kernel repository
-          api_url="https://api.github.com/repos/${{ inputs.kernel_source }}/linux-${{ matrix.kernel_version }}/git/ref/heads/main"
-          source_hash=$(curl -fsSL -m 20 \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              ${api_url} |
-              jq -r '.object.sha'
-          )
-          [[ -z "${source_hash}" || "${source_hash}" == "null" ]] && source_hash="${{ github.sha }}"
-          echo "source_hash=${source_hash}" >> ${GITHUB_ENV}
+          df -hT ${PWD}
+          mkdir -p /builder/{kernel,output}
+          ln -sf /builder/kernel /home/runner/work/_actions/ophub/amlogic-s9xxx-armbian/main/compile-kernel/kernel
+          ln -sf /builder/output /home/runner/work/_actions/ophub/amlogic-s9xxx-armbian/main/compile-kernel/output
           echo "status=success" >> ${GITHUB_OUTPUT}
 
-      - name: Cache ccache
-        uses: actions/cache@v5
-        with:
-          path: /builder/ccache
-          key: kernel-${{ inputs.kernel_toolchain }}-${{ matrix.kernel_version }}-${{ env.source_hash }}
-          restore-keys: |
-            kernel-${{ inputs.kernel_toolchain }}-${{ matrix.kernel_version }}-
-
-      - name: Compile the kernel [ ${{ matrix.kernel_version }} ]
+      - name: Compile the kernel [ ${{ inputs.kernel_version }} ]
         uses: ophub/amlogic-s9xxx-armbian@main
-        if: ${{ steps.disk.outputs.status == 'success' && !cancelled() }}
+        if: ${{ steps.mapped.outputs.status }} == 'success' && !cancelled()
         with:
           build_target: kernel
           kernel_source: ${{ inputs.kernel_source }}
-          kernel_version: ${{ matrix.kernel_version }}
+          kernel_version: ${{ inputs.kernel_version }}
           kernel_auto: ${{ inputs.kernel_auto }}
           delete_source: ${{ inputs.delete_source }}
           kernel_package: ${{ inputs.kernel_package }}
-          kernel_sign: ${{ inputs.kernel_sign }}
           kernel_toolchain: ${{ inputs.kernel_toolchain }}
-          ccache_clear: ${{ inputs.ccache_clear }}
-          docker_hostpath: /builder
-          docker_image: ophub/armbian-${{ inputs.docker_image }}:arm64
+          kernel_sign: ${{ inputs.kernel_sign }}
+          kernel_config: ${{ inputs.kernel_config }}
+          compress_format: ${{ inputs.compress_format }}
+          silent_log: ${{ inputs.silent_log }}
 
       - name: Upload Kernel to Release
-        uses: ophub/upload-to-releases@main
-        if: ${{ env.PACKAGED_STATUS == 'success' && !cancelled() }}
+        uses: ncipollo/release-action@main
+        if: ${{ env.PACKAGED_STATUS }} == 'success' && !cancelled()
         with:
-          tag: kernel_stable
+          tag: kernel_rk35xx
           artifacts: ${{ env.PACKAGED_OUTPUTPATH }}/*
-          allow_updates: true
-          remove_artifacts: false
-          replaces_artifacts: true
-          make_latest: false
-          gh_token: ${{ secrets.GITHUB_TOKEN }}
+          allowUpdates: true
+          token: ${{ secrets.GITHUB_TOKEN }}
           body: |
-            - These are Mainline LTS(Long Term Support) kernels that provide `stable` support for Armbian and OpenWrt.
-            - It works with most `Amlogic`, `Rockchip`, and `Allwinner` devices. For specific details, please refer to the instructions on the homepage of repository.
-            - Dedicated BSP kernels for other Rockchip and Allwinner devices can be downloaded from the [ophub/kernel](https://github.com/ophub/kernel) repository.
-            - 这些是主线 LTS（长期支持）内核，为 Armbian 和 OpenWrt 提供`稳定`的支持。
-            - 适用于 `amlogic`，`rockchip`，`allwinner` 的大部分设备，具体可以参考仓库首页的说明。
-            - 其他的 Rockchip 和 Allwinner 设备专用 BSP 内核可以在 [ophub/kernel](https://github.com/ophub/kernel) 仓库里下载使用。
+            - The kernel can be used to compile Armbian and OpenWrt.
+            - The kernel source code comes from: unifreq/linux-5.10.y-rk35xx
+            - The kernel compilation toolchain: gcc
+            - This is a dedicated kernel for `Rockchip rk3528/rk3566/rk3568` and is not compatible with other series.
+            - 这是 `Rockchip rk3528/rk3566/rk3568` 专用内核，和其他系列不通用。
