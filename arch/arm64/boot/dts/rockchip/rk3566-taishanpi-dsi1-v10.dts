@@ -389,6 +389,7 @@
 			MIPI_DSI_MODE_LPM | MIPI_DSI_MODE_NO_EOT_PACKET)>;
 		dsi,format = <MIPI_DSI_FMT_RGB888>;
 		dsi,lanes  = <4>;
+		rotation = <90>;
 		panel-init-sequence = [
 			39 00 04 FF 98 81 03
 			15 00 02 01 00
